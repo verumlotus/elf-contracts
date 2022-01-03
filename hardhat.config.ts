@@ -67,6 +67,33 @@ const config: HardhatUserConfig = {
             },
           },
         },
+      "@uniswap/v3-core/contracts/libraries/FullMath.sol": {
+        version: "0.7.6",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 800,
+          },
+        },
+      },
+      "@uniswap/v3-core/contracts/libraries/TickMath.sol": {
+        version: "0.7.6",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 800,
+          },
+        },
+      },
+      "contracts/UniswapOracle.sol": {
+        version: "0.7.6",
+        settings: {
+          optimizer: {
+            enabled: true,
+            runs: 400,
+          },
+        },
+      },
     },
   },
   mocha: { timeout: 0 },

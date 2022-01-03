@@ -71,6 +71,7 @@
         "structs",
         "totalweth",
         "tsmerge",
+        "twapDuration",
         "twohundred",
         "typechain",
         "TYPEHASH",
