@@ -5,12 +5,15 @@ import { loadTrancheHopFixture, TrancheHopInterface } from "./helpers/deployer";
 import { createSnapshot, restoreSnapshot } from "./helpers/snapshots";
 import { advanceTime } from "./helpers/time";
 import { impersonate, stopImpersonating } from "./helpers/impersonate";
+import { TestableVM, TestableVMInterface } from "typechain/TestableVM";
+import weiroll from "@weiroll/weiroll.js";
 
 const { provider } = waffle;
 
 describe("zapTrancheHop", () => {
   let users: { user: Signer; address: string }[];
   let fixture: TrancheHopInterface;
+  let vm: TestableVM;
 
   // send `amount` of shares directly to the yearn vault simulating interest.
   async function yearnInterestSim(amount: BigNumberish) {
@@ -46,6 +49,9 @@ describe("zapTrancheHop", () => {
     const usdcWhale = ethers.provider.getSigner(usdcWhaleAddress);
     await fixture.usdc.connect(usdcWhale).transfer(users[1].address, 2e11); // 200k usdc
     stopImpersonating(usdcWhaleAddress);
+
+    const testVm = await ethers.getContractFactory("TestableVM");
+    vm = await testVm.deploy();
   });
   after(async () => {
     // revert back to initial state after all tests pass
@@ -205,6 +211,50 @@ describe("zapTrancheHop", () => {
       // no interest accumulated in new tranche so no PT discounting
       expect(ptBalanceT2).to.equal(ytBalanceT2);
       expect(ptBalanceT2).to.be.at.least(1);
+    });
+
+    it("Should able to chain the steps that get performed in the hopTranche", async () => {
+      const ptBalanceT1 = await fixture.tranche1.balanceOf(users[1].address);
+      const ytBalanceT1 = await fixture.interestToken1.balanceOf(
+        users[1].address
+      );
+      // 1. Create wrapping contracts
+      const trancheFrom = weiroll.Contract.createContract(fixture.tranche1);
+      const trancheTo = weiroll.Contract.createContract(
+        fixture.tranche2.connect(users[1].user)
+      );
+      const interestTokenFrom = weiroll.Contract.createContract(
+        fixture.interestToken1.connect(users[1].user)
+      );
+      // 2. Create Planner
+      const planner = new weiroll.Planner();
+      // 3. Approve the funds to the VM
+      await fixture.tranche1
+        .connect(users[1].user)
+        .approve(vm.address, ptBalanceT1);
+      await fixture.interestToken1
+        .connect(users[1].user)
+        .approve(vm.address, ytBalanceT1);
+      // Command 1 - Transfer the tranche funds to the VM so it can spend.
+      planner.add(trancheFrom.transferFrom(vm.address, ptBalanceT1));
+      // Command 2 - withdraw the principal
+      const ret1 = planner.add(
+        trancheFrom.withdrawPrincipal(ptBalanceT1, fixture.position.address)
+      );
+      console.log(`Return value 1 ${ret1}`);
+      // Command 3 - Transfer the interest token funds to the VM so it can spend.
+      planner.add(interestTokenFrom.transferFrom(vm.address, ytBalanceT1));
+      // Command 4 -  withdraw the interest token
+      const ret2 = planner.add(
+        trancheFrom.withdrawInterest(ytBalanceT1, fixture.position.address)
+      );
+      // Command 5 - prefund deposit to new tranche
+      const ret3 = planner.add(trancheTo.prefundedDeposit(users[0].user));
+
+      // Execute the commands.
+      const { commands, state } = planner.plan();
+
+      await vm.execute(commands, state);
     });
   });
 });
